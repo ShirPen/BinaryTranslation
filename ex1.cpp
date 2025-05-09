@@ -22,27 +22,70 @@ struct RTNInfo {
     UINT64 callCount = 0;
 };
 
-// a map for easy access for rutines information
-map<RTN, RTNInfo*> rtnMap;
-// use vector so we can sort the statistics 
-vector<RTNInfo*> rtnStats;
+struct BBLInfo {
+    ADDRINT bblAddr;
+    UINT64 execCount = 0;
+    UINT64 takenCount = 0;
+    UINT64 fallthruCount = 0;
+    UINT64 unCondCount = 0;
+    map<ADDRINT, UINT64> addrCountMap;
+};
+
 ofstream outFile;
 
-// count the number of instructions for each rutine
-VOID CountInstructions(RTNInfo* info) {
-    info->instrCount++;
+
+VOID unCondCount(BBLInfo* info) {
+    info->fallthruCount++;
 }
 
-// count the number  of calls for each rutine
-VOID OnRoutineCall(RTNInfo* info) {
-    info->callCount++;
-}
+
+VOID docount_inc_call(INT32 taken) { CountSeen._call++;  if (taken) CountTaken._call++; }
+VOID docount_inc_call_indirect(INT32 taken){ CountSeen._call_indirect++;  if (taken) CountTaken._call_indirect++; }
+VOID docount_inc_branch(INT32 taken){ if (taken) info->takencCount++; else info->fallthruCount++; }
+VOID docount_inc_branch_indirect(INT32 taken, BBL info){ if (taken) info->takencCount++; else info->fallthruCount++; }
+VOID docount_inc_syscall(INT32 taken){ CountSeen._branch_indirect++; CountTaken._branch_indirect++; }
+VOID docount_inc_return(INT32 taken){ CountSeen._return++;  if (taken) CountTaken._return++; }
+
 
 // the main function collecting information for each rutine and sets the treatment rutines for each rutine and instruction
-VOID InstrumentRoutine(RTN rtn, VOID* v) {
+VOID BlockRoutine(BBL blk, VOID* v) {
 
     // check that the rutine is valid
-    if (!RTN_Valid(rtn)) return;
+    INS lastIns = BBL_InsTail(blk);
+       
+    if (INS_IsDirectControlFlow(lastIns))
+    {
+        if (INS_IsCall(lastIns))
+            INS_InsertCall(lastIns, IPOINT_BEFORE, (AFUNPTR)docount_inc_call, IARG_BRANCH_TAKEN, IARG_END);
+        else
+            INS_InsertCall(lastIns, IPOINT_BEFORE, (AFUNPTR)docount_inc_branch, IARG_BRANCH_TAKEN, IARG_END);
+    }
+    else if (INS_IsIndirectControlFlow(lastIns))
+    {
+        //call = unconditional jump
+        if (INS_IsCall(lastIns))
+            INS_InsertCall(lastIns, IPOINT_BEFORE, (AFUNPTR)docount_inc_call_indirect, IARG_BRANCH_TAKEN, IARG_END);
+        //return = unconditional jump
+        else if (INS_IsRet(lastIns))
+        {
+            INS_InsertCall(lastIns, IPOINT_BEFORE, (AFUNPTR)docount_inc_return, IARG_BRANCH_TAKEN, IARG_END);
+        }
+        //syscall = unconditional jump
+        else if (INS_IsSyscall(lastIns))
+        {
+            INS_InsertCall(lastIns, IPOINT_BEFORE, (AFUNPTR)docount_inc_syscall, IARG_BRANCH_TAKEN, IARG_END);
+        }
+        else
+            INS_InsertCall(lastIns, IPOINT_BEFORE, (AFUNPTR)docount_inc_branch_indirect, IARG_BRANCH_TAKEN, blk, IARG_END);
+    }
+
+    //this instruction is not a jump instruction
+    else 
+        return;
+
+
+
+
 
     // open the rutine so we can change it
     RTN_Open(rtn);
